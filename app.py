@@ -1,5 +1,5 @@
 import streamlit as st
-import akshare as ak
+import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
@@ -12,27 +12,31 @@ st.sidebar.header("手动分析设置")
 symbol = st.sidebar.text_input("股票代码（例如 002413）", value="002413")
 days = st.sidebar.slider("分析天数", 30, 365, 120)
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def get_stock_data(code, days, retries=3):
-    """获取A股数据，带重试机制"""
-    end_date = datetime.now().strftime("%Y%m%d")
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+@st.cache_data(ttl=1800, show_spinner=False)  # 缓存30分钟
+def get_stock_data(code, days, retries=3, delay=3):
+    """获取股票数据，带重试机制（yfinance）"""
+    # 自动添加市场后缀
+    if code.startswith('6'):
+        ticker = f"{code}.SS"
+    else:
+        ticker = f"{code}.SZ"
+    end = datetime.now()
+    start = end - timedelta(days=days)
+    
     for attempt in range(retries):
         try:
-            # 使用标准的 stock_zh_a_hist 函数
-            df = ak.stock_zh_a_hist(
-                symbol=code,
-                start_date=start_date,
-                end_date=end_date,
-                adjust="qfq"
-            )
+            df = yf.download(ticker, start=start, end=end, progress=False, timeout=10)
             if df.empty:
+                st.warning(f"未获取到数据，请检查代码 {code} 是否正确。")
                 return None
-            # 标准化列名（实际返回的列名是中文，但可能略有不同）
-            # 实际返回列名通常为：日期,开盘,收盘,最高,最低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
-            df.columns = ["日期", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
-            df["日期"] = pd.to_datetime(df["日期"])
-            df.set_index("日期", inplace=True)
+            # 标准化列名
+            df.rename(columns={
+                "Open": "开盘",
+                "High": "最高",
+                "Low": "最低",
+                "Close": "收盘",
+                "Volume": "成交量"
+            }, inplace=True)
             # 计算均线
             df["MA5"] = df["收盘"].rolling(5).mean()
             df["MA20"] = df["收盘"].rolling(20).mean()
@@ -44,7 +48,7 @@ def get_stock_data(code, days, retries=3):
             return df
         except Exception as e:
             if attempt < retries - 1:
-                time.sleep(2)  # 重试前等待2秒
+                time.sleep(delay)  # 等待后重试
                 continue
             else:
                 st.error(f"获取数据失败（重试{retries}次后）：{e}")
