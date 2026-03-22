@@ -1,0 +1,23 @@
+name: Daily Stock Analysis
+
+on:
+  schedule:
+    - cron: '30 14 * * *'   # 每天 14:30 UTC (北京时间 22:30)
+  workflow_dispatch:        # 允许手动触发
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run daily analysis
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PWD: ${{ secrets.EMAIL_PWD }}
+        run: python daily_analysis.py
