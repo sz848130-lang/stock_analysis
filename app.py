@@ -19,7 +19,8 @@ def get_stock_data(code, days, retries=3):
     start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
     for attempt in range(retries):
         try:
-            df = ak.stock_zh_a_hist_em(
+            # 使用标准的 stock_zh_a_hist 函数
+            df = ak.stock_zh_a_hist(
                 symbol=code,
                 start_date=start_date,
                 end_date=end_date,
@@ -27,7 +28,8 @@ def get_stock_data(code, days, retries=3):
             )
             if df.empty:
                 return None
-            # 标准化列名
+            # 标准化列名（实际返回的列名是中文，但可能略有不同）
+            # 实际返回列名通常为：日期,开盘,收盘,最高,最低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
             df.columns = ["日期", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
             df["日期"] = pd.to_datetime(df["日期"])
             df.set_index("日期", inplace=True)
