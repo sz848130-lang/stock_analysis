@@ -26,6 +26,7 @@ def get_stock_data_yf(code, days, max_retries=5):
     for attempt in range(max_retries):
         try:
             df = yf.download(ticker, start=start, end=end, progress=False, timeout=10)
+            # 检查是否为空 DataFrame
             if df.empty:
                 return None
             # 标准化列名
@@ -46,7 +47,7 @@ def get_stock_data_yf(code, days, max_retries=5):
             return df
         except Exception as e:
             if "RateLimited" in str(e) or "Too Many Requests" in str(e):
-                wait_time = (2 ** attempt) + random.uniform(0, 2)  # 指数退避
+                wait_time = (2 ** attempt) + random.uniform(0, 2)
                 st.warning(f"Yahoo 限速，等待 {wait_time:.1f} 秒后重试...")
                 time.sleep(wait_time)
                 continue
@@ -95,6 +96,7 @@ def get_stock_data(code, days):
 if st.sidebar.button("开始分析"):
     with st.spinner("正在获取数据，请稍候..."):
         df = get_stock_data(symbol, days)
+        # 关键：使用显式判断，避免 Series 歧义
         if df is not None and not df.empty:
             latest = df.iloc[-1]
             try:
