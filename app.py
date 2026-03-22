@@ -1,8 +1,9 @@
 import streamlit as st
-import yfinance as yf
+import akshare as ak
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import time
 
 st.set_page_config(page_title="股票量化分析", layout="wide")
 st.title("📈 股票量化分析工具")
@@ -11,48 +12,50 @@ st.sidebar.header("手动分析设置")
 symbol = st.sidebar.text_input("股票代码（例如 002413）", value="002413")
 days = st.sidebar.slider("分析天数", 30, 365, 120)
 
-@st.cache_data(ttl=3600)
-def get_stock_data(code, days):
-    # 自动添加市场后缀
-    if code.startswith('6'):
-        ticker = f"{code}.SS"
-    else:
-        ticker = f"{code}.SZ"
-    end = datetime.now()
-    start = end - timedelta(days=days)
-    try:
-        df = yf.download(ticker, start=start, end=end, progress=False)
-        if df.empty:
-            st.warning(f"未获取到数据，请检查股票代码 {code} 是否正确")
-            return None
-        # 确保列名标准（yfinance 返回的是英文）
-        df.rename(columns={
-            "Open": "开盘",
-            "High": "最高",
-            "Low": "最低",
-            "Close": "收盘",
-            "Volume": "成交量"
-        }, inplace=True)
-        # 计算均线
-        df["MA5"] = df["收盘"].rolling(5).mean()
-        df["MA20"] = df["收盘"].rolling(20).mean()
-        df["信号"] = 0
-        df.loc[df["MA5"] > df["MA20"], "信号"] = 1
-        df.loc[df["MA5"] < df["MA20"], "信号"] = -1
-        df["持仓变化"] = df["信号"].diff()
-        return df
-    except Exception as e:
-        st.error(f"数据获取失败：{e}")
-        return None
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_stock_data(code, days, retries=3):
+    """获取A股数据，带重试机制"""
+    end_date = datetime.now().strftime("%Y%m%d")
+    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+    for attempt in range(retries):
+        try:
+            df = ak.stock_zh_a_hist_em(
+                symbol=code,
+                start_date=start_date,
+                end_date=end_date,
+                adjust="qfq"
+            )
+            if df.empty:
+                return None
+            # 标准化列名
+            df.columns = ["日期", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
+            df["日期"] = pd.to_datetime(df["日期"])
+            df.set_index("日期", inplace=True)
+            # 计算均线
+            df["MA5"] = df["收盘"].rolling(5).mean()
+            df["MA20"] = df["收盘"].rolling(20).mean()
+            # 信号
+            df["信号"] = 0
+            df.loc[df["MA5"] > df["MA20"], "信号"] = 1
+            df.loc[df["MA5"] < df["MA20"], "信号"] = -1
+            df["持仓变化"] = df["信号"].diff()
+            return df
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(2)  # 重试前等待2秒
+                continue
+            else:
+                st.error(f"获取数据失败（重试{retries}次后）：{e}")
+                return None
+    return None
 
 if st.sidebar.button("开始分析"):
-    with st.spinner("获取数据中..."):
+    with st.spinner("正在获取数据，请稍候..."):
         df = get_stock_data(symbol, days)
         if df is not None and not df.empty:
-            # 获取最新一行的数值（确保是标量）
+            # 获取最新数据
+            latest = df.iloc[-1]
             try:
-                # 使用 .iloc[-1] 取最后一行，再取列值，避免 Series 问题
-                latest = df.iloc[-1]
                 close_val = float(latest["收盘"])
                 ma5_val = float(latest["MA5"])
                 ma20_val = float(latest["MA20"])
@@ -73,7 +76,7 @@ if st.sidebar.button("开始分析"):
             latest_signal = "买入" if signal_val == 1 else ("卖出" if signal_val == -1 else "观望")
             st.info(f"当前信号：{latest_signal}")
 
-            # 绘制 K 线图（使用中文列名）
+            # K线图
             fig = go.Figure()
             fig.add_trace(go.Candlestick(
                 x=df.index,
@@ -92,7 +95,7 @@ if st.sidebar.button("开始分析"):
             display_df = df[["开盘","最高","最低","收盘","MA5","MA20"]].tail(20)
             st.dataframe(display_df)
         else:
-            st.error("未获取到数据，请检查股票代码是否正确。")
+            st.error("未获取到数据，请检查股票代码是否正确，或稍后重试。")
 
 st.markdown("---")
 st.markdown("### 使用说明")
