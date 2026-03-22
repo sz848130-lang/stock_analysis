@@ -15,49 +15,72 @@ days = st.sidebar.slider("分析天数", 30, 365, 120)
 def get_stock_data(code, days):
     # 自动添加市场后缀
     if code.startswith('6'):
-        ticker = f"{code}.SS"   # 上海
+        ticker = f"{code}.SS"
     else:
-        ticker = f"{code}.SZ"   # 深圳
+        ticker = f"{code}.SZ"
     end = datetime.now()
     start = end - timedelta(days=days)
     try:
         df = yf.download(ticker, start=start, end=end, progress=False)
         if df.empty:
+            st.warning(f"未获取到数据，请检查股票代码 {code} 是否正确")
             return None
+        # 确保列名标准（yfinance 返回的是英文）
+        df.rename(columns={
+            "Open": "开盘",
+            "High": "最高",
+            "Low": "最低",
+            "Close": "收盘",
+            "Volume": "成交量"
+        }, inplace=True)
         # 计算均线
-        df["MA5"] = df["Close"].rolling(5).mean()
-        df["MA20"] = df["Close"].rolling(20).mean()
+        df["MA5"] = df["收盘"].rolling(5).mean()
+        df["MA20"] = df["收盘"].rolling(20).mean()
         df["信号"] = 0
         df.loc[df["MA5"] > df["MA20"], "信号"] = 1
         df.loc[df["MA5"] < df["MA20"], "信号"] = -1
         df["持仓变化"] = df["信号"].diff()
         return df
     except Exception as e:
-        st.error(f"获取数据失败：{e}")
+        st.error(f"数据获取失败：{e}")
         return None
 
 if st.sidebar.button("开始分析"):
     with st.spinner("获取数据中..."):
         df = get_stock_data(symbol, days)
-        if df is not None:
+        if df is not None and not df.empty:
+            # 获取最新一行的数值（确保是标量）
+            try:
+                # 使用 .iloc[-1] 取最后一行，再取列值，避免 Series 问题
+                latest = df.iloc[-1]
+                close_val = float(latest["收盘"])
+                ma5_val = float(latest["MA5"])
+                ma20_val = float(latest["MA20"])
+                signal_val = latest["信号"]
+            except Exception as e:
+                st.error(f"数据解析错误：{e}")
+                st.stop()
+
             st.success("分析完成！")
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("最新收盘价", f"{df['Close'].iloc[-1]:.2f}")
+                st.metric("最新收盘价", f"{close_val:.2f}")
             with col2:
-                st.metric("MA5", f"{df['MA5'].iloc[-1]:.2f}")
+                st.metric("MA5", f"{ma5_val:.2f}")
             with col3:
-                st.metric("MA20", f"{df['MA20'].iloc[-1]:.2f}")
-            latest_signal = "买入" if df["信号"].iloc[-1] == 1 else ("卖出" if df["信号"].iloc[-1] == -1 else "观望")
+                st.metric("MA20", f"{ma20_val:.2f}")
+
+            latest_signal = "买入" if signal_val == 1 else ("卖出" if signal_val == -1 else "观望")
             st.info(f"当前信号：{latest_signal}")
 
+            # 绘制 K 线图（使用中文列名）
             fig = go.Figure()
             fig.add_trace(go.Candlestick(
                 x=df.index,
-                open=df["Open"],
-                high=df["High"],
-                low=df["Low"],
-                close=df["Close"],
+                open=df["开盘"],
+                high=df["最高"],
+                low=df["最低"],
+                close=df["收盘"],
                 name="K线"
             ))
             fig.add_trace(go.Scatter(x=df.index, y=df["MA5"], mode='lines', name="MA5", line=dict(color='orange')))
@@ -66,7 +89,8 @@ if st.sidebar.button("开始分析"):
             st.plotly_chart(fig, use_container_width=True)
 
             st.subheader("最新20日数据")
-            st.dataframe(df[['Open','High','Low','Close','MA5','MA20']].tail(20))
+            display_df = df[["开盘","最高","最低","收盘","MA5","MA20"]].tail(20)
+            st.dataframe(display_df)
         else:
             st.error("未获取到数据，请检查股票代码是否正确。")
 
